@@ -1,0 +1,480 @@
+---
+title: "R Notebook"
+author: "Cédric EBIA"
+output:
+html_notebook: default
+pdf_document: default
+Date: 18/09/2020
+---
+
+
+# 1. Chargement des différents packages
+```{r}
+require(ggplot2)
+require(tidyverse)
+require(pastecs)
+require(caTools)
+require(ROCR)
+require(stringr)
+require(readr)
+```
+
+# 2. Chargement de la table en entrée
+
+```{r}
+studytable<-read.csv(file="DonneeScoring",header=TRUE, stringsAsFactors = TRUE)
+head(studytable)
+```
+
+# 3. Nettoyage du fichier et premières analyses
+```{r}
+summary(studytable) #Quelques éléments de statistiques descriptives sur nos données
+#Comptage du nombre de valeurs manquantes (Aucune valeur manquante dans nos données)
+sapply(studytable, function(x) sum(is.na(x)))
+```
+
+Aucune valeur manquante apparente (type NA) dans nos données
+Cependant, on peut se rendre compte que pour l'une des variables (native_country), nous avons une modalité "?" .
+
+## 3.1 Détection des valeurs aberrantes
+
+### a) La variable Age
+```{r}
+#Pour ce qui est de l'âge
+outlier_age<-ggplot(studytable) +
+ aes(x = "", y = age) +
+ geom_boxplot(fill = "#0c4c8a") +
+ labs(y = "Age",x="", title = "Boxplot sur la distribution de l'âge ")
+ theme_minimal()
+outlier_age
+dens_age<-density(studytable$age)
+plot(dens_age,frame=FALSE, col="blue",main="Density plot of the variable AGE")
+```
+
+Au niveau des stats descriptives de l'âge, on peut se rendre compte que l'âge médian des individus étudiés est de 37 ans (tandis que la moyenne est de 38 ans). En essayant de récupérer les différentes valeurs aberrantes, nous obtenons les résultats suivants:
+
+
+```{r}
+
+outlier_age2<-ggplot(studytable) +
+ aes(x = Income, y = age) +
+ geom_boxplot(fill = "#0c4c8a") +
+ labs(x = "Income", y = "Age", title = "Répartition de l'âge en fonction du niveau de revenu") +
+ theme_minimal()
+outlier_age2
+```
+
+
+En se concentrant sur la récupération des différentes valeurs aberrantes au niveau de l'âge, nous obtenons les résultats suivants:
+```{r}
+#Récupération valeurs aberrantes pour la variable age
+val_age<-boxplot.stats(studytable$age)$out
+val_age
+```
+On peut noter que les valeurs des outliers relevés pour l'âge concernent des individus qui ont entre 79 et 90 ans. Bien que ces individus paraissent aberrants, nous allons les conserver. Au total, il s'agit de 143 observations liées à l'âge que nous avons comme outliers.
+
+En essayant d'examiner de façon brève les informations liées à ces outliers dans la table, nous obtenons les résultats suivants;
+
+```{r}
+indx_age<-which(studytable$age %in% c(val_age))
+studytable[indx_age,]
+```
+
+```{r}
+#Vérification de la répartition des revenus dans les outliers
+
+ggplot(studytable[indx_age,]) +
+ aes(x = age, fill = Income) +
+ geom_histogram() +
+ scale_fill_hue() +
+ labs(x = "Age", title = "Répartition de l'âge selon le revenu") +
+ theme_minimal()
+
+```
+
+### b) La variable hours.per.week
+```{r}
+outlier_hours<-ggplot(studytable) +
+ aes(x = "", y = hours.per.week) +
+ geom_boxplot(fill = "#0c4c8a") +
+ labs(y = "Hours per week",x="", title = "Boxplot sur la distribution du temps de travail hebdomadaire ")
+ theme_minimal()
+outlier_hours
+
+```
+```{r}
+summary(studytable$hours.per.week)
+```
+On peut se rendre compte que le hours.per.week médian est de 40 tandis que la moyenne est de 40.44 heures. Cependant, on distingue des valeurs pour lesquelles il est soit beaucoup trop faible, soit beaucoup plus important.
+```{r}
+#Vérification des individus ayant un temps de traval trop faible
+filter(studytable, hours.per.week==1)
+#On note qu'il y a bel et bien une incohérence dans nos données à ce niveau là
+```
+```{r}
+ggplot(studytable) +
+ aes(x = hours.per.week) +
+ geom_histogram(fill = "#0c4c8a") +
+ labs(x = "Hours per Weeks", y = "Nombre d'occurences", title = "Répartition du nombre d'heures travaillées par semaine") +
+ theme_minimal()
+
+
+```
+
+
+```{r}
+#Récupération des différents outliers liés à la variable hours.per.week
+boxplot.stats(studytable$hours.per.week)$out
+```
+
+En premier lieu, il convient d'effectuer un retraitement sur cette variable en la transformant en variable qualitative éventuellement suivant les premières statistiques descriptives.
+
+```{r}
+#Rappel sur la variable hours.per.week
+summary(studytable$hours.per.week)
+class(studytable$hours.per.week)
+dens_hours<-density(studytable$hours.per.week)
+plot(dens_hours,frame=FALSE, col="blue",main="Density plot of hours.per.week")
+```
+
+Le découpage effectué se base sur le fait que la plupart des individus travaillent entrent 35H et 40H. Par ailleurs, le nombre d'heures de travail à temps plein aux USA est de 40H. Après le découpage, nous obtenons les résultats suivants:
+```{r}
+#Copie de la table d'origine
+studytable2<-studytable
+#Découpage de la variable hours.per.week
+studytable2$hours.per.week.quali <- cut(studytable2$hours.per.week, include.lowest=FALSE,  right=TRUE, breaks=c(0, 35, 40, 100), labels = c("Less than 35H per week","Between 35 and 40H per week", "More than 40H per week"))
+#Visualisation de la nouvelle répartition de la variable hours.per.week
+summary(studytable2$hours.per.week.quali)
+
+rep_hours.per.week<-ggplot(studytable2) +
+ aes(x = hours.per.week.quali) +
+ geom_bar(fill = "#0c4c8a") +
+ labs(title = "Répartition de la variable Hours.per.Week au sein de notre population") +
+ theme_minimal()
+
+rep_hours.per.week
+
+```
+
+### c) Les variables capital.gain et capital.loss
+
+  + Capital.gain
+
+```{r}
+#Quelques statistiques descriptives sur les deux variables
+print("capital gain stats")
+summary(studytable$capital.gain)
+print("capital loss stats")
+summary(studytable$capital.loss)
+```
+
+```{r}
+#En se penchant un peu plus sur la détection de valeurs aberrantes pour la variable capital.gain
+par(mfrow=c(1,1))
+dens_gain<-density(studytable$capital.gain)
+outlier_gain<-ggplot(studytable) +
+ aes(x = "", y = capital.gain) +
+ geom_boxplot(fill = "#0c4c8a") +
+ labs(y = "Capital gain",x="", title = "Boxplot sur la distribution de la variable capital gain ")
+ theme_minimal()
+distrib_gain<- ggplot(studytable) +
+ aes(x = capital.gain) +
+ geom_histogram(bins = 30L, fill = "#0c4c8a") +
+ labs(x = "Capital gain", y = "Nombre d'occurences", title = "Histogramme sur la distribution de la variable capital.gain") +
+ theme_light()
+
+plot(dens_hours,frame=FALSE, col="blue",main="Density plot of capital gain")
+outlier_gain
+distrib_gain
+```
+On peut remarquer que bon nombre d'indivdus ont un capital.gain=0 et il n'y a que peu d'individus qui ont un capital.gain qui y soit supérieur.
+
+Eventuellement, selon leur nombre, on pourrait songer à supprimer les individus qui ont un capital.gain qui est trop important.
+
+
+* Faire des recherches sur l'origine de cette variable
+https://www.irs.gov/newsroom/capital-gains-and-losses-10-helpful-facts-to-know-0
+
+```{r}
+boxplot.stats(studytable$capital.gain)$out
+```
+
+  + Capital.loss
+
+```{r}
+dens_loss<-density(studytable$capital.loss)
+outlier_gain<-ggplot(studytable) +
+ aes(x = "", y = capital.loss) +
+ geom_boxplot(fill = "#0c4c8a") +
+ labs(y = "Capital loss",x="", title = "Boxplot sur la distribution de la variable capital loss ")
+ theme_minimal()
+distrib_gain<- ggplot(studytable) +
+ aes(x = capital.loss) +
+ geom_histogram(bins = 30L, fill = "#0c4c8a") +
+ labs(x = "Capital loss", y = "Nombre d'occurences", title = "Histogramme sur la distribution de la variable capital.loss") +
+ theme_light()
+
+plot(dens_hours,frame=FALSE, col="blue",main="Density plot of capital loss")
+outlier_gain
+distrib_gain
+```
+```{r}
+filter(studytable, capital.gain > 0 & capital.loss > 0)
+```
+
+Etant donné que l'écrasante majorité des individus ne fait ni de gains ni de pertes financières, nous avons décidé d'exclure les deux variables (elles ne sont pas discriminantes).
+
+
+### d) La variable fnlwgt (qui sera exclue)
+
+En vérifiant la corrélation entre fnlwhgt et income:
+
+```{r}
+anova<-aov(fnlwgt~Income,data = studytable)
+summary(anova)
+#La variable fnlwgt n'est pas significativement liée au revenu.
+#Nous n'allons pas l'utiliser dans nos modélisations
+```
+
+On a pu se rendre compte qu'elles ne sont pas liées. De ce fait, nous allons la supprimer de notre table (Nous ne l'utiliserons pas pour nos différentes analyses)
+
+### e) Pour les variables liées à l'éducation
+
+En ce qui concerne les variables liées à l'éducation, on ne conservera que la variable education étant donné que la variable education_num donne la même information (et elle est moins précise en termes de compréhension)
+
+```{r}
+#Suppression des différentes modalités non intéressantes (fnlwgt,education.num,cap.gain/loss,hours.per.week)
+
+studytable2<-studytable2[,-c(3,5,11,12,13)]
+```
+
+
+```{r}
+summary(studytable$education)
+print(class(studytable$education))
+```
+
+```{r}
+#Graphique de la répartition de l'éducation
+rep_education<-ggplot(studytable) +
+ aes(x = education) +
+ geom_bar(fill = "#0c4c8a") +
+ labs(title = "Répartition du niveau d'éducation au sein de la population") +
+ theme_minimal()
+rep_education
+
+```
+
+##3.2) Regroupement des différentes variables
+  + Pour les variables liées au niveau d'éducation
+L'idée à ce stade est de regrouper l'ensemble des personnes ayant quitté l'école relativement tôt et l'ensemble des personnes faisant partie de la catégorie associates
+```{r}
+studytable2$education.quali<-studytable2$education
+# Recodage de studytable2$education.quali 
+studytable2$education.quali <- fct_recode(studytable2$education.quali,
+               "Early Dropout" = " 10th",
+               "Early Dropout" = " 11th",
+               "Early Dropout" = " 12th",
+               "Early Dropout" = " 1st-4th",
+               "Early Dropout" = " 5th-6th",
+               "Early Dropout" = " 7th-8th",
+               "Early Dropout" = " 9th",
+               "Associates" = " Assoc-acdm",
+               "Associates" = " Assoc-voc",
+               "Bachelors" = " Bachelors",
+               "Doctorate" = " Doctorate",
+               "HS-grad" = " HS-grad",
+               "Masters" = " Masters",
+               "Early Dropout" = " Preschool",
+               "Prof-school" = " Prof-school",
+               "Some-college" = " Some-college")
+
+summary(studytable2$education.quali)
+```
+
+  + Pour les variables liées au marital_status (Marital Status et relationship)
+  
+De prime abord, en se fiant au sens des deux variables, on peut noter qu'elles traduisent la même information sur un individu (Son statut marital). De ce fait, le choix nous revient de garder l'une d'entre elles.
+Dans notre cas, nous allons garder la suivante: Marital_status.
+
+https://en.wikipedia.org/wiki/Marital_status (Pour également justifier le fait d'inclure "separated" dans la modalité "married")
+
+```{r}
+#Recodage de la variable marital_status
+studytable2$marital.status.quali <- fct_recode(studytable2$marital.status,
+               "Not-married" = " Divorced",
+               "Married" = " Married-AF-spouse",
+               "Married" = " Married-civ-spouse",
+               "Married" = " Married-spouse-absent",
+               "Not-married" = " Never-married",
+               "Separated" = " Separated",
+               "Widowed" = " Widowed")
+summary(studytable2$marital.status.quali)
+```
+
+Finalement, nous avons fait le choix de garder la modalité "separed" étant donné que ce statut peut paraître ambigu. En effet, les individus peuvent par exemple se tromper dans le choix de leur réponse (De ce fait certaines personnes peuvent être soit married ou non married dans ce cas de figure).
+
+  + Etude de la variable Race
+
+```{r}
+summary(studytable2$race)
+```
+
+  + Pour la variable Workclass
+
+```{r}
+#Répartition de la variable workclass
+print("Pour la partie Workclass")
+summary(studytable2$workclass)
+print("Pour la partie Occupation")
+summary(studytable2$occupation)
+```
+
+Dans ce cas précis, la variable "occupation" nous paraît relativement exhaustive quant à l'information sur la situation professionnelle de l'individu. De ce fait, nous allons essayer de nous restreindre à la variable "Workclass".
+
+```{r}
+#Recodage de la variable Workclass
+studytable2$workclass.quali<-studytable2$workclass
+studytable2$workclass.quali <- fct_recode(studytable2$workclass,
+               "No answer" = " ?",
+               "Government" = " Federal-gov",
+               "Government" = " Local-gov",
+               "Unemployed" = " Never-worked",
+               "Self-employed" = " Self-emp-inc",
+               "Self-employed" = " Self-emp-not-inc",
+               "Government" = " State-gov",
+               "Unemployed" = " Without-pay")
+```
+
+Une fois ce découpage effectué, essayons de dresser quelques statistiques sur notre nouvelle variable.
+```{r}
+summary(studytable2$workclass.quali)
+```
+
+  + Pour la variable Native.country
+
+```{r}
+summary(studytable2$native.country)
+```
+
+On pourrait éventuellement tenter un recodage de cette variable de sorte à voir s'il est possible d'en tirer une information pertinente. Cependant, il convient de noter que les  individus de notre jeu de données viennent majoritairement des USA.
+
+```{r}
+studytable2$native.country.quali<-studytable2$native.country
+studytable2$native.country.quali <- fct_recode(studytable2$native.country,
+               "Other" = " ?",
+               "Asia" = " Cambodia",
+               "Canada" = " Canada",
+               "Asia" = " China",
+               "America Latina" = " Columbia",
+               "America Latina" = " Cuba",
+               "America Latina" = " Dominican-Republic",
+               "America Latina" = " Ecuador",
+               "America Latina" = " El-Salvador",
+               "Europe" = " England",
+               "Europe" = " France",
+               "Europe" = " Germany",
+               "Europe" = " Greece",
+               "America Latina" = " Guatemala",
+               "America Latina" = " Haiti",
+               "Europe" = " Holand-Netherlands",
+               "America Latina" = " Honduras",
+               "Asia" = " Hong",
+               "America Latina" = " Hungary",
+               "Asia" = " India",
+               "Asia" = " Iran",
+               "Europe" = " Ireland",
+               "Europe" = " Italy",
+               "America Latina" = " Jamaica",
+               "Asia" = " Japan",
+               "Asia" = " Laos",
+               "America Latina" = " Mexico",
+               "America Latina" = " Nicaragua",
+               "USA" = " Outlying-US(Guam-USVI-etc)",
+               "America Latina" = " Peru",
+               "Asia" = " Philippines",
+               "Europe" = " Poland",
+               "Europe" = " Portugal",
+               "America Latina" = " Puerto-Rico",
+               "Europe" = " Scotland",
+               "Other" = " South",
+               "Asia" = " Taiwan",
+               "Asia" = " Thailand",
+               "America Latina" = " Trinadad&Tobago",
+               "USA" = " United-States",
+               "Asia" = " Vietnam",
+               "Europe" = " Yugoslavia")
+
+summary(studytable2$native.country.quali)
+```
+
+  + Pour la variable Age
+  
+Etant donné que nous avions quelques valeurs aberrantes pour l'âge, nous avions décidé initialement de la créer sous la forme d'une variable catégorielle. De ce fait, nous avions plusieurs possibilités à ce sujet
+
+```{r}
+print("Quelques statistiques initiales sur l'âge")
+summary(studytable2$age)
+```
+En utilisant l'algorithme des K-Means pour savoir le nombre de classes à retenir pour la variable age, nous retiendrons le découpage suivant:
+
+Explication simple du K-Means Clustering: https://lovelyanalytics.com/2016/09/06/k-means-comment-ca-marche/
+
+```{r}
+studytable2$age.quali<-studytable2$age
+#Recodage des différentes modalités
+## Recodage de studytable2$age en studytable2$age.quali
+studytable2$age.quali <- cut(studytable2$age, include.lowest=TRUE,
+                             breaks=c(17, 26.5, 35.5, 43.5, 51.5, 62.5, 100),
+                             labels = c("Between 17 and 26.5 yrs", #Youngsters and young adults
+                                        "Between 26.5 and 35.5 yrs",#Adults
+                                        "Between 35.5 and 43.5 yrs",#Senior adults
+                                        "Between 43.5 and 51.5 yrs",#Middle age
+                                        "Between 51.5 and 62.5 yrs",#Before retirement or last 10 years before retirement
+                                        "More than 62.5 yrs")) #Generally age of retirement and more (or old persons)
+
+#Quelques statistiques sur la nouvelle variable créée
+print("Statistiques sur la nouvelle variable age")
+summary(studytable2$age.quali)
+
+```
+
+
+## 3.3) Création de la table à partir de laquelle l'ensemble des statistques descriptives seront effectuées
+```{r}
+#Retrait des variables suivantes: age, workclass, education, marital.status, native.country
+getColumnIndexByColname <- function(df, cn) {
+  return(
+    # which(colnames(df) == cn)
+    grep(pattern = cn, x = colnames(df))
+  )
+}
+getColumnIndexByColname(studytable2,"native")
+
+final_table<-studytable2[,-c(1:4,9)]
+View(final_table)
+```
+
+#4) Statistiques descriptives
+
+```{r}
+summary(final_table)
+```
+
+Pour le reste des statistiques descriptives descriptives, nous pourrons les effectuer soit sous Excel, soit sous R.
+
+```{r}
+#Création d'une matrice de V de Cramer pour avoir une lisibilité sur les liens à étudier de façon approfondie
+
+# cramer_matrix = matrix(NA, nrow=ncol(df), ncol=ncol(df)) %>% as.data.frame
+# colnames(cramer_matrix) = colnames(df)
+# rownames(cramer_matrix) = colnames(df)
+# for (r in 1:nrow(cramer_matrix)){
+#   for (c in 1:ncol(cramer_matrix)){
+#     if (r>=c){
+#       cramer_matrix[r,c] = df[, c(r,c)] %>% table %>% cramer.v
+#     }
+#   }
+# }
+```
+
