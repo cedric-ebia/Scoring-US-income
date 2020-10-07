@@ -1,0 +1,429 @@
+---
+title: "Elaboration des différents modèles"
+output: pdf_document
+Author: "Cédric EBIA"
+Date:
+---
+# Chargement des différents packages 
+
+```{r}
+#Chargement des différents packages
+require(caTools)
+require(ROCR)
+require(pROC)
+require(MASS)
+```
+
+
+# 1) Elaboration d'un modèle de régression logistique
+
+Etant donné que nous disposons de variables d'ordre qualitatives, une première modélisation que nous pouvons effectuer est la régression logistique (Qui contrairement au modèle de régression linéaire n'est pas sensible à l'hétéroscédasticité des résidus, etc...). Les variables à utiliser pour la modélisation sont les suivantes:
+
+    + Occupation (Relation forte >0.3)
+    + Marital Status (Relation forte>0.3)
+    + Education (Relation forte>0.3)
+    + Hours.per.week (Relation moyenne càd entre 0.20 et 0.30)
+    + Age (Relation forte>0.30)
+    + Capital (Relation forte)
+
+(L'idée reste de construire plusieurs modèles de sorte à pouvoir faire un aller-retour vers le feature engineering afin de les améliorer)
+
+
+Notre premier choix se portera sur le modèle logit
+
+```{r}
+#Détermination des différents niveaux de notre variable cible
+levels(final_table$Income)
+```
+
+## 1.1) Split du jeu de données
+```{r}
+#Set a seed
+set.seed(1234)
+spl = sample.split(final_table, SplitRatio = 0.70)
+train = subset(final_table, spl == TRUE)
+test  = subset(final_table, spl == FALSE)
+```
+
+##1.2) Modélisation de régression logistique
+
+  + Vérifions quelques infos sur notre échantillon d'apprentissage
+```{r}
+print("Pour l'échantillon d'apprentissage")
+summary(train$Income)
+print("Pour l'échantillon de test")
+summary(test$Income)
+```
+  
+Maintenant, on peut entamer la modélisation.
+
+### a) Apprentissage du modèle logistique
+
+```{r}
+#Modèle sur échantillon d'apprentissage
+model_glm1<-glm(Income~occupation+age+education+maritus.status+hours.per.week+Capital, data=train,family = binomial)
+summary(model_glm1)
+```
+
+
+```{r}
+predict1<-predict(model_glm1,train, type="response")
+ROC_pred = prediction(predict1, train$Income)
+ROC_perf = performance(ROC_pred, "tpr", "fpr")
+#Construction de la courbe de ROC
+plot(ROC_perf, colorize=TRUE, print.cutoffs.at = seq(0,1,0.1), text.adj = c(-0.2, 1.7))
+abline(a=0, b=1)
+#Adding some values
+auc_train <- round(as.numeric(performance(ROC_pred, "auc")@y.values),2)
+legend(.8, .2, auc_train, title = "AUC", cex=1)
+#Precision recall curve
+```
+
+En essayant de dresser la matrice de confusion liée à ces données, nous avons le résultat suivant:
+```{r}
+#En choisissant un seuil de 0.5 pour que Income soit de type >50K
+head(predict1)
+online_mtx<-table(predict1>0.5, train$Income)
+online_mtx
+```
+
+En se basant sur ce premier résultat, on peut déduire que le taux de mauvais classement est de: 16.66%. (Qui constitue le taux d'erreur moyen).
+
+```{r}
+accuracy_LR <-(online_mtx[1,1] + online_mtx[2,2])/sum(online_mtx)
+accuracy_LR
+```
+En se basant sur le code trouvé sur internet, on peut se rendre compte que le taux de précision du modèle est de 0,84 avec un AUC=0,89. Cependant, il convient de sélectionner la meilleure valeur seuil afin de pouvoir avoir de meilleurs résultats.  
+
+  * Evaluation du modèle glm1 (APPRENTISSAGE)
+En essayant d'évaluer le modèle 1 sur l'échantillon d'apprentissage, nous obtenons les résultats suivants:
+
+```{r}
+roc_train = model_glm1 %>% predict(train, type="response") %>% roc(train$Income, ., plot=T)
+#roc_test  = model_glm1 %>% predict(test , type="response") %>% roc(test$Income, ., plot=T)
+```
+
+
+
+
+
+```{r}
+print("Détermination du seuil de probabilité à retenir")
+t_train = roc_train %>% coords("best") %>% .$threshold
+t_train
+preds_train = model_glm1 %>% predict(train, type="response")
+preds_train = ifelse(preds_train > t_train, 1, 0)
+
+print("Matrice de confusion sur l'échantillon TRAIN")
+matrice_confusion_train = preds_train %>% table(train$Income)
+matrice_confusion_train
+print("Accuracy train")
+accuracy_train = sum(diag(matrice_confusion_train))/sum(matrice_confusion_train); accuracy_train
+
+
+# preds_test = model_glm1 %>% predict(test, type="response")
+# preds_test = ifelse(preds_test > t_train, 1, 0)
+# matrice_confusion_test = preds_test %>% table(test$Income)
+# print("Accuracy test")
+# accuracy_test = sum(diag(matrice_confusion_test))/sum(matrice_confusion_test); accuracy_test
+
+#Stocker la prédiction
+#train$pred<-model_glm1 %>% predict(train, type="response")
+```
+
+Au vu des résultats obtenus, nous pouvons nous permettre de calculer les éléments suivants:
+  + Sensibilité (TRAIN)= 0.85
+  + Spécificité (TRAIN)= 0.78
+
+
+Eventuellement, nous pouvons expliquer voire interpréter les différents coefficients de notre modèle.
+
+
+### b) Evaluation du premier modèle de régression logistique sur l'échantillon test
+
+
+```{r}
+preds_test = model_glm1 %>% predict(test, type="response")
+preds_test = ifelse(preds_test > t_train, 1, 0)
+print("Matrice de confusion sur l'échantillon TEST")
+matrice_confusion_test = preds_test %>% table(test$Income)
+matrice_confusion_test
+print("Accuracy sur l'échantillon de test")
+accuracy_test = sum(diag(matrice_confusion_test))/sum(matrice_confusion_test); accuracy_test
+```
+
+Le taux de précision sur l'échantillon test est de 0.793 ce qui reste relativement appréciable (en considérant le seuil de probabilité de 0.22)
+
+Au vu des résultats obtenus, nous pouvons dresser les statistiques suivantes:
+
+  + Sensibilité = 0.85
+  + Spécificité = 0.77
+
+
+## 1.3) Construction d'un deuxième modèle de régression logistique (Incluant la var= Sex)
+
+```{r}
+model_glm2<-glm(Income~occupation+age+education+maritus.status+hours.per.week+Capital+sex, data=train,family = binomial)
+summary(model_glm2)
+```
+
+
+### a) Evaluation sur TRAIN du deuxième logit
+
+```{r}
+predict2<-predict(model_glm2,train, type="response")
+ROC_pred2 = prediction(predict2, train$Income)
+ROC_perf2 = performance(ROC_pred2, "tpr", "fpr")
+#Construction de la courbe de ROC
+plot(ROC_perf2, colorize=TRUE, print.cutoffs.at = seq(0,1,0.1), text.adj = c(-0.2, 1.7))
+abline(a=0, b=1)
+#Adding some values
+auc_train2 <- round(as.numeric(performance(ROC_pred2, "auc")@y.values),2)
+legend(.8, .2, auc_train2, title = "AUC", cex=1)
+#Precision recall curve
+```
+
+On peut se rendre compte qu'en dressant notre modèle, nous avons toujours un AUC de 0,89 ce qui reste relativement appréciable.
+
+En dressant la courbe de ROC qui nous servira:
+```{r}
+roc_train2 = model_glm2 %>% predict(train, type="response") %>% roc(train$Income, ., plot=T)
+```
+
+
+
+```{r}
+print("Détermination du seuil de probabilité à retenir")
+t_train2 = roc_train2 %>% coords("best") %>% .$threshold
+t_train2
+preds_train2 = model_glm2 %>% predict(train, type="response")
+preds_train2 = ifelse(preds_train2 > t_train2, 1, 0)
+
+print("Matrice de confusion sur l'échantillon TRAIN")
+matrice_confusion_train2 = preds_train2 %>% table(train$Income)
+matrice_confusion_train2
+print("Accuracy train")
+accuracy_train2 = sum(diag(matrice_confusion_train2))/sum(matrice_confusion_train2); accuracy_train2
+
+```
+
+
+Nous avons dans ce cas une précision du modèle de 0.80 qui reste relativement convenable.
+En essayant de dresser des statistiques sur ce modèle, nous obtenons les résultats suivants:
+
+  + Sensibilité = 0,8409
+  + Spécificité = 0,786
+  
+Rappel: Seuil de probabilité = 0.228
+
+### b) Evaluation sur l'échantillon TEST du deuxième logit
+
+```{r}
+preds_test2 = model_glm2 %>% predict(test, type="response")
+preds_test2 = ifelse(preds_test2 > t_train2, 1, 0)
+print("Matrice de confusion sur l'échantillon TEST")
+matrice_confusion_test2 = preds_test2 %>% table(test$Income)
+matrice_confusion_test2
+print("Accuracy sur l'échantillon de test")
+accuracy_test2 = sum(diag(matrice_confusion_test2))/sum(matrice_confusion_test2); accuracy_test2
+```
+
+Nous avons une accuracy de 0,80 sur l'échantillon test.
+En essayant de dresser des statistiques sur ce modèle, nous obtenons les résultats suivants:
+
+  + Sensibilité= 0.8442191
+  + Spécificité= 0.782367
+
+
+```{r}
+#Recherche du meilleur seuil de proba auquel accepter que Income= >50K
+# t_train2 = roc_train2 %>% coords("best") %>% .$threshold
+# t_train2
+# preds_train2 = model_glm2 %>% predict(train, type="response")
+# preds_train2 = ifelse(preds_train2 > t_train2, 1, 0)
+# 
+# print("Accuracy train")
+# matrice_confusion_train2 = preds_train2 %>% table(train$Income)
+# #Affichage de la matrice de Confusion
+# matrice_confusion_train2
+# accuracy_train = sum(diag(matrice_confusion_train2))/sum(matrice_confusion_train2); accuracy_train
+# #L'accuracy du modèle est de 0.78.
+# 
+# preds_test2 = model_glm2 %>% predict(test, type="response")
+# preds_test2 = ifelse(preds_test2 > t_train2, 1, 0)
+# matrice_confusion_test2 = preds_test2 %>% table(test$Income)
+# print("Accuracy test")
+# accuracy_test2 = sum(diag(matrice_confusion_test))/sum(matrice_confusion_test); accuracy_test
+# 
+# #Stocker la prédiction
+# train$pred<-model_glm1 %>% predict(train, type="response")
+```
+
+
+## 1.4) Modèle avec sélection de variables
+
+```{r}
+step_model<-glm(Income~., data=train,family = binomial) %>% stepAIC(trace = FALSE)
+summary(step_model)
+```
+
+### a) Evaluation du modèle step sur le TRAIN sample
+
+```{r}
+predict3<-predict(step_model,train, type="response")
+ROC_pred3 = prediction(predict3, train$Income)
+ROC_perf3 = performance(ROC_pred3, "tpr", "fpr")
+#Construction de la courbe de ROC
+plot(ROC_perf3, colorize=TRUE, print.cutoffs.at = seq(0,1,0.1), text.adj = c(-0.2, 1.7))
+abline(a=0, b=1)
+#Adding some values
+auc_train3 <- round(as.numeric(performance(ROC_pred3, "auc")@y.values),2)
+legend(.8, .2, auc_train3, title = "AUC", cex=1)
+#Precision recall curve
+```
+
+
+Avec ce modèle stepwise, nous avons un AUC de 0.90 qui reste relativement appréciable.
+
+```{r}
+roc_train3 = step_model %>% predict(train, type="response") %>% roc(train$Income, ., plot=T)
+```
+
+
+```{r}
+print("Détermination du seuil de probabilité à retenir")
+t_train3 = roc_train3 %>% coords("best") %>% .$threshold
+t_train3
+preds_train3 = step_model %>% predict(train, type="response")
+preds_train3 = ifelse(preds_train3 > t_train3, 1, 0)
+
+print("Matrice de confusion sur l'échantillon TRAIN")
+matrice_confusion_train3 = preds_train3 %>% table(train$Income)
+matrice_confusion_train3
+print("Accuracy train")
+accuracy_train3 = sum(diag(matrice_confusion_train3))/sum(matrice_confusion_train3); accuracy_train3
+
+```
+
+En effectuant cela, nous avons une précision de 0,78 sur notre échantillon d'apprentissage ce qui reste peu intéressant comparé aux autres modèles.
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+
+# 2) Arbres de décision
+```{r}
+require(rpart)
+require(rpart.plot)
+```
+
+
+## 2.1) Construction d'un premier arbre de décision
+
+```{r}
+tree1<-rpart(Income ~ ., data=train, method="class") #method="class" arg tells us to make classification tree and not regression tree
+rpart.plot(tree1,extra = 106)
+```
+
+
+En essayant d'évaluer l'arbre de décision construit, nous obtenons les résultats suivants:
+
+```{r}
+predict_tree1_train = predict(tree1, newdata = train, type = "class")
+confusionmatrix_tree1_train<-table(train$Income, predict_tree1_train)
+print("Matrice de confusion de l'arbre de décision")
+confusionmatrix_tree1_train
+```
+
+Au vu de la matrice de confusion sur l'échantillon d'apprentissage, nous pouvons déduire les résultats suivants:
+  + Sensibilité (TRAIN)= 0,696
+  + Spécificité (TRAIN)= 0,855
+
+La spécificité du modèle est beaucoup plus importante que sa sensibilité.  
+  
+En essayant de déterminer la précision du modèle, nous obtenons les résultats suivants:
+
+```{r}
+accuract_CART1_train <- (confusionmatrix_tree1_train[1,1] + confusionmatrix_tree1_train[2,2])/sum(confusionmatrix_tree1_train)
+print("Précision de l'arbre de décision construit")
+accuract_CART1_train
+```
+
+On peut se rendre compte que la précision de l'arbre de décision est de 0.82 ce qui reste relativement supérieur à la régression logistique (sur l'échantillon d'apprentissage à première vue).
+
+En essayant de transcrire cela sur l'échantillon test, nous obtenons les résultats suivants:
+
+```{r}
+predict_tree1_test<-predict(tree1,newdata = test, type= "class")
+confusionmatrix_tree1_test<-table(test$Income, predict_tree1_test)
+print("Matrice de confusion de l'arbre de décision")
+confusionmatrix_tree1_test
+```
+
+
+Au vu de la matrice de confusion sur l'échantillon TEST, nous pouvons déduire les résultats suivants:
+  + Sensibilité (TRAIN)= 0,714
+  + Spécificité (TRAIN)= 0,852
+  
+Sur l'échantillon de test, les résultats sont quelques peu meilleurs.*
+
+En essayant de déterminer la précision du modèle, nous obtenons les résultats suivants:
+
+```{r}
+accuract_CART1_test <- (confusionmatrix_tree1_test[1,1] + confusionmatrix_tree1_test[2,2])/sum(confusionmatrix_tree1_test)
+print("Précision de l'arbre de décision construit")
+accuract_CART1_test
+```
+
+On peut se rendre compte que la précision de l'arbre de décision est de 0,828 ce qui nous permet de dire que le modèle est relativement stable.
+
+En essayant d'évaluer les performances de l'arbre de décision, nous obtenons les résultats suivants:
+
+```{r}
+PredictROC_Tree_test = predict(tree1, newdata = test)
+predict_tree_test_plot = prediction(PredictROC_Tree_test[, 2], test$Income)
+#as.numeric(performance(predict2, "auc")@y.values)
+```
+
+```{r}
+#Représentation graphique de la courbe de ROC pour l'arbre de décision
+performance_tree1_test = performance(predict_tree_test_plot, "tpr", "fpr")
+plot(performance_tree1_test, main = "ROC curve for rpart tree on test sample")
+```
+
+
+
+
+```{r}
+#Conseils utiles sur l'analyse de l'arbre de décisions
+# traint = train[, c(1:(ncol(train)-1))]
+# tree = rpart(Income~., data=traint)
+# tree %>% summary
+# tree %>% rpart.ploth   
+# 
+#  result_tree=tree %>% predict(traint)
+# result_tree_fin<-result_tree[,-c(1)]
+# head(result_tree_fin)
+# #Stocker la prédiction
+# predt<-tree %>% predict(traint,)
+```
+
+
+# 3) RANDOM FOREST
+
+```{r}
+#Chargement des packages pour appliquer l'algorithme des random Forest
+require(randomForest)
+require(randomForestExplainer)
+require(randomForestSRC)
+```
+
+
+## 3.1) Construction d'un premier modèle de random forest
+
+```{r}
+train_random_forest<- randomForest(Income~.-native.country, data=train)
+```
+
