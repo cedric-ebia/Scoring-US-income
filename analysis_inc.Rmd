@@ -1,7 +1,7 @@
 ---
-title: "R Notebook"
+title: "Etude préalable des données Income Scoring"
 author: "Cédric EBIA"
-output:
+output: pdf_document
 html_notebook: default
 pdf_document: default
 Date: 18/09/2020
@@ -17,6 +17,12 @@ require(caTools)
 require(ROCR)
 require(stringr)
 require(readr)
+require(questionr)
+require(FactoMineR)
+require(explor)
+require(factoextra)
+require(rpart)
+require(discretization)
 ```
 
 # 2. Chargement de la table en entrée
@@ -69,7 +75,7 @@ En se concentrant sur la récupération des différentes valeurs aberrantes au n
 ```{r}
 #Récupération valeurs aberrantes pour la variable age
 val_age<-boxplot.stats(studytable$age)$out
-val_age
+head(val_age,20)
 ```
 On peut noter que les valeurs des outliers relevés pour l'âge concernent des individus qui ont entre 79 et 90 ans. Bien que ces individus paraissent aberrants, nous allons les conserver. Au total, il s'agit de 143 observations liées à l'âge que nous avons comme outliers.
 
@@ -86,7 +92,7 @@ studytable[indx_age,]
 ggplot(studytable[indx_age,]) +
  aes(x = age, fill = Income) +
  geom_histogram() +
- scale_fill_hue() +
+ scale_fill_viridis_d(option = "cividis") +
  labs(x = "Age", title = "Répartition de l'âge selon le revenu") +
  theme_minimal()
 
@@ -124,7 +130,9 @@ ggplot(studytable) +
 
 ```{r}
 #Récupération des différents outliers liés à la variable hours.per.week
-boxplot.stats(studytable$hours.per.week)$out
+#Plus de 8000 valeurs aberrantes
+val.hours<-boxplot.stats(studytable$hours.per.week)$out
+head(val.hours,50)
 ```
 
 En premier lieu, il convient d'effectuer un retraitement sur cette variable en la transformant en variable qualitative éventuellement suivant les premières statistiques descriptives.
@@ -196,7 +204,10 @@ Eventuellement, selon leur nombre, on pourrait songer à supprimer les individus
 https://www.irs.gov/newsroom/capital-gains-and-losses-10-helpful-facts-to-know-0
 
 ```{r}
-boxplot.stats(studytable$capital.gain)$out
+#Affichage des valeurs aberrantes
+#Plus de 2000 valeurs aberrantes
+val.cap.gain<-boxplot.stats(studytable$capital.gain)$out
+head(val.cap.gain,50)
 ```
 
   + Capital.loss
@@ -223,8 +234,48 @@ filter(studytable, capital.gain > 0 & capital.loss > 0)
 ```
 
 Etant donné que l'écrasante majorité des individus ne fait ni de gains ni de pertes financières, nous avons décidé d'exclure les deux variables (elles ne sont pas discriminantes).
+Cependant, on pourrait essayer de la transformer en variable dichotomique.
 
+```{r}
+studytable2$capital.gain.quali<-ifelse(studytable2$capital.gain>0,yes = 1,no = 0)
+studytable2$capital.loss.quali<-ifelse(studytable2$capital.loss>0, yes=1, no=0)
+#Transformation de la variable en Factor
+studytable2$capital.gain.quali<-as.factor(studytable2$capital.gain.quali)
+studytable2$capital.loss.quali<-as.factor(studytable2$capital.loss.quali)
+#Nouvelles stats desc sur ces variables
+print("Pour la nouvelle variable capital loss")
+summary(studytable2$capital.loss.quali)
+print("Pour la variable capital gain")
+summary(studytable2$capital.gain.quali)
+```
 
+  * Une autre façon d'utiliser les variables capital_gain et capital_loss serait de combiner leurs effets en effectuant une différence, constituant ainsi une nouvelle variable qui pourra éventuellement être discrétisée selon sa distribution.
+  
+  
+```{r}
+# studytable2$capital<-studytable2$capital.gain-studytable2$capital.loss
+# summary(studytable2$capital)
+# #Visualisation de la distribution de la variable Capital
+# outlier_capital<-ggplot(studytable2) +
+#  aes(x = "", y = capital) +
+#  geom_boxplot(fill = "#0c4c8a") +
+#  labs(title = "Boxplot sur la distribution de la nouvelle variable capital") +
+#  theme_minimal()
+# 
+# distrib_capital<-ggplot(studytable2) +
+#  aes(x = capital) +
+#  geom_histogram(bins = 30L, fill = "#0c4c8a") +
+#  labs(title = "Distribution de la variable Capital") +
+#  theme_minimal()
+#
+print("Tableau croisé Income et Capital Gain")
+table(studytable2$Income, studytable2$capital.gain.quali)
+print("Tableau croisé Income et Capital Loss")
+table(studytable2$Income, studytable2$capital.loss.quali)
+```
+  
+  
+  
 ### d) La variable fnlwgt (qui sera exclue)
 
 En vérifiant la corrélation entre fnlwhgt et income:
@@ -245,7 +296,7 @@ En ce qui concerne les variables liées à l'éducation, on ne conservera que la
 ```{r}
 #Suppression des différentes modalités non intéressantes (fnlwgt,education.num,cap.gain/loss,hours.per.week)
 
-studytable2<-studytable2[,-c(3,5,11,12,13)]
+#studytable2<-studytable2[,-c(3,5,11,12,13)]
 ```
 
 
@@ -320,6 +371,20 @@ Finalement, nous avons fait le choix de garder la modalité "separed" étant don
 summary(studytable2$race)
 ```
 
+En essayant de recoder la variable race, nous obtenons les résultats suivants:
+
+```{r}
+studytable2$race_quali <- fct_recode(studytable2$race,
+               "Other" = " Amer-Indian-Eskimo",
+               "Other" = " Asian-Pac-Islander",
+               "Black" = " Black",
+               "Other" = " Other",
+               "White" = " White")
+print("Quelques statistiques sur la nouvelle variable race")
+summary(studytable2$race_quali)
+```
+
+
   + Pour la variable Workclass
 
 ```{r}
@@ -336,7 +401,7 @@ Dans ce cas précis, la variable "occupation" nous paraît relativement exhausti
 #Recodage de la variable Workclass
 studytable2$workclass.quali<-studytable2$workclass
 studytable2$workclass.quali <- fct_recode(studytable2$workclass,
-               "No answer" = " ?",
+               "Others" = " ?",
                "Government" = " Federal-gov",
                "Government" = " Local-gov",
                "Unemployed" = " Never-worked",
@@ -420,6 +485,8 @@ En utilisant l'algorithme des K-Means pour savoir le nombre de classes à reteni
 
 Explication simple du K-Means Clustering: https://lovelyanalytics.com/2016/09/06/k-means-comment-ca-marche/
 
+  * Faire un découpage à la main et voir le résultat
+
 ```{r}
 studytable2$age.quali<-studytable2$age
 #Recodage des différentes modalités
@@ -440,6 +507,69 @@ summary(studytable2$age.quali)
 ```
 
 
+
+  + Pour la variable occupation
+
+
+```{r}
+summary(studytable2$occupation)
+#En supposant que nous pouvons recoder les différentes occupations, nous obtenons les résultats suivants:
+# studytable2$occupation.quali <- recode(studytable2$occupation,
+#                " ?" = "Other -service",
+#                " Adm-clerical" = "Administration",
+#                " Craft-repair" = "Manual worker",
+#                " Farming-fishing" = "Manual Worker",
+#                " Handlers-cleaners" = "Manual Worker")
+# summary(studytable2$occupation.quali)
+#Regroupement à revoir
+#En modifiant le regroupement, nous obtenons les résultats suivants:
+studytable2$occupation_quali <- fct_recode(studytable2$occupation,
+               "No answer" = " ?",
+               "Administration" = " Adm-clerical",
+               "Armed-Forces" = " Armed-Forces",
+               "Manual Worker" = " Craft-repair",
+               "Office job" = " Exec-managerial",
+               "Manual Worker" = " Farming-fishing",
+               "Manual Worker" = " Handlers-cleaners",
+               "Manual Worker" = " Machine-op-inspct",
+               "Services" = " Other-service",
+               "Services" = " Priv-house-serv",
+               "Prof-specialty" = " Prof-specialty",
+               "Services" = " Protective-serv",
+               "Office job" = " Sales",
+               "Office job" = " Tech-support",
+               "Manual Worker" = " Transport-moving")
+print("Statistiques descriptives sur la nouvelle variable Occupation quali")
+summary(studytable2$occupation_quali)
+```
+
+
+++++++++++++++++++++++
+Partie à exécuter
+++++++++++++++++++++++
+
+  + En essayant de créer une nouvelle variable liée au capital
+```{r}
+studytable2$capital<-studytable2$capital.gain-studytable2$capital.loss
+studytable2$capital.quali<-ifelse(test = studytable2$capital>0, yes="Gain in Capital",
+                                  ifelse(test = studytable2$capital<0, yes="Loss in Capital",no = "No Gain or Loss"))
+studytable2$capital.quali<-as.factor(studytable2$capital.quali)
+#Quelques statistiques sur la nouvelle variable construite
+summary(studytable2$capital.quali)
+```
+
+En essayant d'effectuer une représentation graphique de la nouvelle variable créée, nous obtenons les résultats suivants:
+```{r}
+rep_capital.quali<-ggplot(studytable2) +
+ aes(x = capital.quali, fill = Income) +
+ geom_bar() +
+ scale_fill_viridis_d(option = "cividis") +
+ labs(y = "Nombre d'occurences", title = "Répartition de la variable Capital.quali en") +
+ theme_minimal()
+rep_capital.quali
+```
+
+
 ## 3.3) Création de la table à partir de laquelle l'ensemble des statistques descriptives seront effectuées
 ```{r}
 #Retrait des variables suivantes: age, workclass, education, marital.status, native.country
@@ -449,10 +579,10 @@ getColumnIndexByColname <- function(df, cn) {
     grep(pattern = cn, x = colnames(df))
   )
 }
-getColumnIndexByColname(studytable2,"native")
+getColumnIndexByColname(studytable2,"quali")
 
-final_table<-studytable2[,-c(1:4,9)]
-View(final_table)
+final_table<-studytable2[,c(10,15,16:25,27)]
+head(final_table)
 ```
 
 #4) Statistiques descriptives
@@ -462,19 +592,125 @@ summary(final_table)
 ```
 
 Pour le reste des statistiques descriptives descriptives, nous pourrons les effectuer soit sous Excel, soit sous R.
+Avant d'exporter la table pour des analyses, il pourrait être intéressant de renommer chacune des colonnes par son nom exact.
+
+```{r}
+#Modification du nom des différentes colonnes
+colnames(final_table)
+names(final_table)[names(final_table) == "workclass.quali"] <- "workclass"
+names(final_table)[names(final_table) == "education.quali"] <- "education"
+names(final_table)[names(final_table) == "marital.status.quali"] <- "maritus.status"
+names(final_table)[names(final_table) == "hours.per.week.quali"] <- "hours.per.week"
+names(final_table)[names(final_table) == "age.quali"] <- "age"
+names(final_table)[names(final_table) == "native.country.quali"] <- "native.country"
+names(final_table)[names(final_table) == "capital.quali"]<- "Capital"
+names(final_table)[names(final_table) == "race_quali"]<- "race"
+names(final_table)[names(final_table) == "occupation_quali"]<- "occupation"
+summary(final_table)
+```
+
+```{r}
+#Exportation de la table sous forme csv
+# write_csv(final_table,path = "scoring_final.csv",col_names = TRUE)
+
+
+```
 
 ```{r}
 #Création d'une matrice de V de Cramer pour avoir une lisibilité sur les liens à étudier de façon approfondie
 
-# cramer_matrix = matrix(NA, nrow=ncol(df), ncol=ncol(df)) %>% as.data.frame
-# colnames(cramer_matrix) = colnames(df)
-# rownames(cramer_matrix) = colnames(df)
-# for (r in 1:nrow(cramer_matrix)){
-#   for (c in 1:ncol(cramer_matrix)){
-#     if (r>=c){
-#       cramer_matrix[r,c] = df[, c(r,c)] %>% table %>% cramer.v
-#     }
-#   }
-# }
+cramer_matrix = matrix(NA, nrow=ncol(final_table), ncol=ncol(final_table)) %>% as.data.frame
+ colnames(cramer_matrix) = colnames(final_table)
+ rownames(cramer_matrix) = colnames(final_table)
+ for (r in 1:nrow(cramer_matrix)){
+   for (c in 1:ncol(cramer_matrix)){
+     if (r>=c){
+       cramer_matrix[r,c] = final_table[, c(r,c)] %>% table %>% cramer.v
+     }
+   }
+ }
+ cramer_matrix
+```
+Plus haut, il nous est possible de visualiser la matrice de V de Cramer que nous venons d'éditer. Sur la base de cette matrice, nous ne retiendrons que les variables dont le lien avec la variable cible est le plus important.
+
+  * (NB: Le pouvoir explicatif de certaines variables peut être amélioré. Par exemple, la variable hours.per.week, Workclass )
+  
+  * A première vue, les variables qu'on pourrait retenir pour une modélisation sont les suivantes:
+    + Occupation (Relation forte >0.3)
+    + Marital Status (Relation forte>0.3)
+    + Education (Relation forte>0.3)
+    + Hours.per.week (Relation moyenne càd entre 0.20 et 0.30)
+    + Age (Relation forte>0.30)
+    + Capital (Relation forte)
+Cependant, il faut noter que les variables Occupation et Hours.per.week sont une relation moyenne (V de Cramer égal à 0.28 càd ~0.30)
+
+
+```{r}
+#Levels re-ordering
+## Reclassement des modalités de la variable final_table$education
+final_table$education <- factor(final_table$education, levels=c("Early Dropout", "HS-grad", "Prof-school", "Associates", "Some-college", "Bachelors", "Masters", "Doctorate"))
+```
+
+
+## 4.1) Statistiques descriptives entre Income et Hours.per.week
+```{r}
+#H0: Les deux variables sont indépendantes
+chisq.test(final_table$Income, final_table$hours.per.week)
+ #Rejet de l'hypothèse H0. Les variables income et hours.per.week sont bel et bien liées
+table(final_table$hours.per.week, final_table$Income )
+g_income.hours<-ggplot(final_table) +
+ aes(x = hours.per.week, fill = Income) +
+ geom_bar() +
+  scale_fill_viridis_d(option = "cividis") +
+ labs(y = "Nombre d'occurences", title = "Répartition de la variable Income selon la variable Hours.per.week") +
+ theme_minimal()
+g_income.hours
+```
+  
+## 4.2) Statistiques descriptives entre Occupation et Income
+
+```{r}
+chisq.test(final_table$Income, final_table$occupation)
+ #Rejet de l'hypothèse H0. Les variables income et Occupation sont bel et bien liées
+table(final_table$Income, final_table$occupation )
+g_income.occupation<-ggplot(final_table) +
+ aes(x = occupation, fill = Income) +
+ geom_bar() +
+scale_fill_viridis_d(option = "cividis") +
+ labs(y = "Nombre d'occurences", title = "Répartition de la variable Income selon la variable Occupation") +
+ theme_minimal()
+g_income.occupation
+
+#Retraitements à faire sur cette variable
+```
+
+## 4.3) Statistiques entre Income et Age
+
+```{r}
+table(final_table$Income, final_table$age)
+ggplot(final_table) +
+ aes(x = age, fill = Income) +
+ geom_bar() +
+ scale_fill_viridis_d(option = "cividis") +
+ labs(y = "Nombre d'occurences", title = "Répartition de la variable Income selon l'age") +
+ theme_minimal()
+```
+
+## 4.4) statitiques entre Income et Capital
+
+Les personnes ayant des gains ou des pertes en capital sont souvent des personnes qui ont plus de 50K comme capital.
+
+```{r}
+table(final_table$Income, final_table$Capital)
+ggplot(final_table) +
+ aes(x = Capital, fill = Income) +
+ geom_bar() +
+ scale_fill_viridis_d(option = "cividis") +
+ labs(y = "Nombre d'occurences", title = "Répartition de la variable Income selon la variable Capital") +
+ theme_minimal()
+```
+
+```{r}
+summary(final_table$native.country)
 ```
 
